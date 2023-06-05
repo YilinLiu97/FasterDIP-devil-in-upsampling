@@ -1,0 +1,248 @@
+import os
+
+import numpy as np
+import torch
+from torch.nn.functional import grid_sample
+import h5py
+import itertools
+import scipy.io as sio
+import random
+import decimal
+import time
+from .mri_utils import *
+from .common_utils import *
+
+dtype = torch.cuda.FloatTensor
+
+data_root = '/mnt/yaplab/data/yilinliu/datasets/MRF-DIP'
+dict_PATH = '/mnt/yaplab/data/yilinliu/datasets/MRF-DIP'
+meas_PATH = data_root
+
+T1_max, T1_min = 1.0, 0.012
+T2_max, T2_min = 1.0, 0.02
+
+def np_to_torch(arr):
+    return torch.from_numpy(arr)
+
+    
+def normalize_t1(pred):
+    return ((pred - T1.min())/(T1.max() - T1.min()))
+    
+def normalize_t2(pred):
+    return ((pred - T2.min())/(T2.max() - T2.min()))
+    
+def normalize_(pred):
+#    return pred
+#    return 2 * ((pred - pred.min())/(pred.max() - pred.min()))-1
+    return 2 * pred - 1
+    
+def mrf_fft2(imMRF, csm):
+    """
+    fingerprints: (nt, N, N, 2) 2-channel real-valued
+    csm: (1, N, N, nc, 2)
+    """
+    if imMRF.shape[-1] == 2 and csm.shape[-1] == 2:
+       im = torch.view_as_complex(imMRF)
+       csm = torch.view_as_complex(csm)
+
+    multicoil = im.unsqueeze(-1) * csm.unsqueeze(0) # (1, nt, N, N, nc)
+    kdata_multicoil = torch.fft.ifftshift(torch.fft.ifftshift(torch.fft.fft(torch.fft.fft(torch.fft.ifftshift(torch.fft.ifftshift(multicoil, 2),3),axis=3),axis=2),3),2)
+    kdata_mc = torch.stack([torch.real(kdata_multicoil), torch.imag(kdata_multicoil)], -1)
+    return kdata_mc
+
+def mrf_ifft2(kspace_mrf, csm):
+    """
+    kdata: (1, nt, N, N, nc, 2) real
+    """
+    if kspace_mrf.shape[-1] == 2 and csm.shape[-1] == 2:
+       kdata = torch.view_as_complex(kspace_mrf)
+       csm = torch.view_as_complex(csm)
+
+#    MRFimg_multicoil = torch.fft.fftshift(torch.fft.fftshift(torch.fft.ifft(torch.fft.ifft(torch.fft.fftshift(torch.fft.fftshift(data,1),2),axis=1),axis=2), 2), 1)
+    MRFimg_multicoil = torch.fft.fftshift(torch.fft.fftshift(torch.fft.ifft(torch.fft.ifft(torch.fft.fftshift(torch.fft.fftshift(data,2),3),axis=2),axis=3), 3), 2)
+
+    print(f"MRFimg: {MRFimg_multicoil.shape}, csm: {csm.shape}")
+    coil_images = kdata * torch.conj(csm)
+    combined = torch.sum(coil_images, -1)
+    return torch.stack((combined.real, combined.imag), -1)
+
+def retrieve_tmaps(loc_map, r, interp_mode='nearest', pad='border'):
+   """
+   loc_map: normalized to (1, 256, 256, 2), continuous [-1, 1]
+   r: (1, 2, 258, 53)
+   """
+   loc_map = torch.stack((normalize_(loc_map[:,0,...]), normalize_(loc_map[:,1,...])), -1)
+#   loc_map = torch.where(loc_map[...,0:1] * torch.tensor(5000).type(dtype)>loc_map[...,1:2] * torch.tensor(500).type(dtype), loc_map, torch.tensor(-99).type(dtype))
+#   loc_map = loc_map.permute(0,2,3,1)
+  # print(f"loc_map for retrieval: {loc_map}")
+   final = grid_sample(r, loc_map, mode=interp_mode, padding_mode=pad)
+   return final
+
+def inverse_DM(tissue_out, new_dict, tmask, interp_mode='nearest'):
+    """
+    tissue_out: (1, 2, N, N) used as a grid
+    new_dict: (1, nt, 258, 53)
+    
+    return: (1, nt, N, N, 2)
+    """
+#    tissue_grid = tissue_out.permute(0,2,3,1)
+#    tissue_out = normalize_(tissue_out)
+    tissue_grid = torch.stack((normalize_(tissue_out[:,0,...]), normalize_(tissue_out[:,1,...])), -1)
+    print(f"tissue_grid (t1): {tissue_grid[...,0].max()}, {tissue_grid[...,0].min()}")
+    print(f"tissue_grid (t2): {tissue_grid[...,1].max()}, {tissue_grid[...,1].min()}")
+    time_pts = new_dict.shape[1]
+    fps = grid_sample(new_dict, tissue_grid, mode=interp_mode)
+    return torch.stack((fps[0,:time_pts//2,...], fps[0,time_pts//2:,...]), -1)
+    
+def DM(MRFimg, Nex, dict, r, save_name, our_m0=None):
+    """
+    MRFimg, dict: need to be complex
+    """
+    if MRFimg.shape[1] != MRFimg.shape[2]:
+       MRFimg = MRFimg.transpose(2,0,1) # (t, N, N)
+       
+    dict = dict[...,:Nex] + 1j * dict[...,Nex:]
+    
+    if use_gpu:
+        MRFimg = cupy.asarray(MRFimg)
+        dict = cupy.asarray(dict)
+        
+    N = MRFimg.shape[1]
+    dict = dict[:,:Nex]
+    MRFimg = MRFimg[:Nex,:,:]
+    MRFimg = MRFimg.reshape((Nex,N*N), order='F')
+    MRFimg = MRFimg.transpose()
+    MRFimgnorm = np.zeros((MRFimg.shape[0],1),dtype=np.float32)
+    MRFimgnorm[:,0] = xp.sqrt(xp.sum(MRFimg * xp.conj(MRFimg),axis=1))
+
+    # dictnorm = sqrt(sum(dict(trange,:).*conj(dict(trange,:))));
+    dictnorm = np.zeros((1,dict.shape[0]),dtype=np.float32)
+    dictnorm[0,:] = xp.sqrt(xp.sum(dict * xp.conj(dict),axis=1))
+    normAll = xp.matmul(MRFimgnorm,dictnorm)
+
+    # perform inner product
+    #innerProduct = conj(xx)*dict(trange,:)./normAll; clear normAll
+    innerproduct = xp.matmul(xp.conj(MRFimg),dict.transpose())
+    innerproduct = np.abs(innerproduct) / normAll
+
+    indexm = xp.argmax(innerproduct,axis=1)
+
+    # extract T1 and T2 maps
+    t1map = r[0,indexm[:]]
+    t1map = t1map.reshape((N,N),order='F')
+    t2map = r[1,indexm[:]]
+    t2map = t2map.reshape((N,N),order='F')
+
+    # calculate proton density map
+    m0map = np.zeros((N*N),dtype=np.float32)
+
+    for i in range(0,indexm.shape[0]):
+        dictCol = dict[indexm[i],:]
+        tempdictCol = dictCol.conj()/sum(dictCol.conj()*dictCol)
+        m0map[i] = abs(sum(tempdictCol*MRFimg[i,:]))
+    m0map = m0map.reshape((N,N),order='F')
+
+    f=h5py.File(os.path.join(dict_PATH, f"{save_name}.h5"),'w')
+    f.create_dataset('t1', data=t1map)
+    f.create_dataset('t2', data=t2map)
+    f.create_dataset('m0', data=m0map)
+    if our_m0 is not None:
+       f.create_dataset('our_m0', data=our_m0)
+    f.close()
+
+
+def prepare_dictionary(time_pts):
+    MRFDict_filename = os.path.join(dict_PATH, 'dict.mat')
+    f = h5py.File(MRFDict_filename, 'r')
+    print(f'dict.keys()={list(f.keys())}')
+    dict = np.asarray(f['dict'])
+    dict_r = np.asarray(dict['real'], dtype=np.float32)[:,:time_pts]
+    dict_i = np.asarray(dict['imag'], dtype=np.float32)[:,:time_pts]
+    dict = np.concatenate((dict_r, dict_i), -1)
+    r = np.asarray(f['r']) #/ np.array([5000, 500]) # (2, 13123)
+        
+    print(f'dict.shape:{dict.shape}, tissues:{r.shape}')
+    
+    t1v = np.unique(r[0,...])
+    t2v = np.unique(r[1,...])
+
+    c = list(itertools.product(t1v, t2v)) # (13674, 2) => (258 x 53, 2)
+
+    r2 = r.transpose() # (2, 13123)
+    r3 = [tuple(i) for i in r2] # convert to array of tuples
+    invalid = set(c) - set(r3) # 13674 - 13123 = 551
+    invalid_list = list(invalid)
+
+    for i in range(len(invalid)):
+        idx = c.index(invalid_list[i])
+        c[idx] = 'NAN'
+        
+    tissue_table = np.reshape(c, [len(t1v), len(t2v)]) # (258, 53, 2)
+    
+    v1, v2 = np.meshgrid(t1v, t2v, indexing='ij')
+    r_final = np.stack((v1, v2), 0) # (2, 258, 53)
+    
+    pos_table = np.empty((len(t1v), len(t2v)))
+    for i in range(len(t1v)):
+        for j in range(len(t2v)):
+            if tissue_table[i,j] != 'NAN':
+                idx = r3.index(tissue_table[i,j])
+                pos_table[i,j] = idx
+            else:
+                pos_table[i,j] = -999999
+                
+    pos_table = np.asarray(pos_table, dtype='int') # (258, 53, 2)
+    
+    new_dict = np.ones((len(t1v), len(t2v), time_pts*2)) * 999
+    new_dict[pos_table != -999999] = dict
+    
+    print(f"Inverse DM is ready, with tissue table: {tissue_table.shape} and idx table: {pos_table.shape}")
+    
+    return np_to_torch(new_dict.transpose(2,0,1)[np.newaxis,:,:,:]).type(dtype), np_to_torch(r_final[np.newaxis,...]).type(dtype) # dict: (1, tps, 258, 53), r: (2, 258, 53)
+
+def save(d, filename='save.h5', complex=False):
+    f = h5py.File(os.path.join(filename), 'w')
+    pts = d.shape[-1] // 2
+    if complex:
+        f.create_dataset('imMRF_generated/real', data=d[...,:pts])
+        f.create_dataset('imMRF_generated/imag', data=d[...,pts:])
+    else:
+        mag = np.abs(d[...,:pts] + 1j * d[...,pts:])
+        f.create_dataset('mag', data=mag)
+    f.close()
+
+'''
+# Main
+time_pts = 144
+save_name_FP = f'save_fingerprints_{time_pts}'
+save_name_DM = f'generated_DM_{time_pts}'
+tissue_table, pos_table, t1v, t2v, dict, r = prepare_dictionary(time_pts)
+
+
+t1_pred = np.random.uniform(60,5000,(30,256,256))
+t2_pred = np.random.uniform(10,500,(30,256,256))
+
+
+tf = h5py.File(os.path.join(data_root,'patternmatching_2304.mat'),'r')
+#cf = sio.loadmat(os.path.join(data_root,'cmap.mat'))
+
+t1gt = tf['t1big'][:]
+t1_pred = np.clip(t1gt + np.random.uniform(0,0.6, t1gt.shape), 60, 5000)
+t2gt = tf['t2big'][:]
+t2_pred = np.clip(t2gt + np.random.uniform(0,0.6, t2gt.shape), 10, 500)
+m0 = tf['m0big'][:]
+our_m0 = cal_m0()
+#cmap = cf['cmap'][:]
+
+tissue_out = np.stack((t1_pred, t2_pred), -1)
+
+start_time = time.time()
+final = inverse_DM(tissue_out, pos_table, t1v, t2v, dict, time_pts)
+print(f"Inverse DM with {time_pts} time points  taken --- {time.time() - start_time} --- seconds")
+
+save(final* m0[...,np.newaxis], os.path.join(dict_PATH, f'{save_name_FP}.h5'), complex=True)
+print(f"Finished! Final is: {final.shape} saved in {dict_PATH}")
+
+print(f"Now doing DM using the generated fingerprints...")
+DM(final, time_pts, dict, r, save_name_DM, our_m0=None)
+'''

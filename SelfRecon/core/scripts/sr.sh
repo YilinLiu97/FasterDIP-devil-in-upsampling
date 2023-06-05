@@ -1,0 +1,41 @@
+python super_resolution.py --task sr \
+                      --model_type DIP_2_scaled \
+                      --progressive False \
+                      --num_iters 3000 \
+                      --folder_path '/mnt/yaplab/data/yilinliu/datasets/Set5' \
+                      --save_folder '/mnt/yaplab/data/yilinliu/saves/padding_act_test/Set5' \
+                      --sr_factor 4 \
+                      --sr_kernel_type lanczos2 \
+                      --filter_size_down 3 \
+                      --filter_size_up 3 \
+                      --in_size 8 4 \
+                      --progressive False \
+                      --num_layers 7 \
+                      --num_skips 5 \
+                      --need_sigmoid True \
+                      --loss_func mse \
+                      --freq_loss_func moment_matching \
+                      --num_scales 5 \
+                      --optimizer adam \
+                      --decay_lr False \
+                      --step_size 50 \
+                      --gamma 0.55 \
+                      --morph_lbda 1e-5 \
+                      --exit_layer_idx_prior 0.5 \
+                      --min_tau 0.4 \
+                      --exp_weight 0.99 \
+                      --noise_type u \
+                      --noise_method noise \
+                      --n_freqs 8 \
+                      --special 5levels_5skips_128chns_zero_LeakyReLU \
+                      --prune_type None \
+                      --reg_type 0 \
+                      --decay 0 0 \
+                      --freq_lbda 0 \
+                      --reg_noise_std '1/30' \
+                      --upsample_mode bilinear \
+                      --act_func LeakyReLU \
+                      --pad zero \
+                      --dim 128 \
+                      --lr 0.01                       
+                      
