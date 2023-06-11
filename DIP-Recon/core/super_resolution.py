@@ -87,11 +87,10 @@ def main(args):
   
         args.exp_name = args.save_path + '/' + filename.split(".")[0]
         os.makedirs(args.exp_name, exist_ok=True)
-        print('>>>>>>>>>>>>>>>>>>>>>>>>>> exp_name: ', args.exp_name)
+
         ### reconstruct ###
         ni_shape = [1] + [args.dim] + list(args.in_size)
         ni, args = get_noise(args.dim, args.noise_method, args.in_size, args.noise_type, freq_dict=freq_dict, args=args)
-        print("ni: ", ni.shape)
        
         net = getModel(args).type(dtype)
 
@@ -309,8 +308,6 @@ if __name__ == '__main__':
 
     if args.task == 'sr' and args.sr_factor != 0:
        args.save_path = f"{args.save_folder}/{args.task}/{args.sr_factor}/{args.model_type}"
-    else:
-       args.save_path = f"{args.save_folder}/{args.task}/{args.model_type}"
 
     if args.special is not None:
        args.save_path += f"_{args.special}"

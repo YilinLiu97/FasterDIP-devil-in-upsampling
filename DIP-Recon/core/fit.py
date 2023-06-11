@@ -222,20 +222,6 @@ def fit(args,
            total_loss += args.freq_lbda * freq_loss(out, img_noisy_var)
  
         total_loss.backward()
-   
-        '''        
-        wi, wi_sq = 0.0, 0.0
-        for param in net.parameters():
-          if param.requires_grad and torch.sum(torch.abs(param))>0:
-              wi += torch.sum(torch.abs(param))
-              wi_sq += torch.sum(param ** 2)
-
-        for group in optimizer.param_groups:
-          for param in group['params']:
-              wg = 2 * torch.sign(param.data) * (wi / wi_sq**2) * (wi_sq - torch.abs(param.data) * wi)
-              wd = wg * args.decay
-              param.data = param.data.add(-wd * group['lr'])
-        '''    
 
         if args.sr:
           updateBN(net, args.sr)
