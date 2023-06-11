@@ -1,7 +1,32 @@
-# Faster-DIP
+# Faster-DIP-Devil-in-Upsampling
 
-Codebase for our paper "The Devil is in the Upsampling: Architectural Decisions Made Simpler for Denoising with Deep Image Prior"
+Codebase for our paper "*The Devil is in the Upsampling: Architectural Decisions Made Simpler for Denoising with Deep Image Prior*". [Arxiv](https://arxiv.org/pdf/2304.11409.pdf)
 
-Code for running the main CNN-based experiments shown in our paper can be found in `SelfRecon`. We additionally extend our finding / strategy to transformers. Please see `transformer-DIP`.
+We discover that the *unlearnt* upsampling is the main driving force behind the denoising phenomenon (and probably other image restoration tasks as well, e.g., super resolution) when the Deep Image Prior[DIP](https://arxiv.org/pdf/1711.10925.pdf) paradigm is used, and translate this finding into practical DIP architectural design for every image without the laborious search.
 
-For now, the instructions for running the code can be found in the respective folder. We will clean the code and revise the instructions soon.
+## Dependencies
+To install the environment, run:
+```shell script
+conda env create -f environment.yml 
+source activate selfrecon
+```
+## Dataset
+We find that DIP architectural deisgn should be associated with image texture for more effective denoising, and thus build a **Texture-DIP-dataset **, which consists of three popular datasets re-classified into several predifined width choices based on the complexity of image texture. We also include the classic dataset [Set9](https://webpages.tuni.fi/foi/GCF-BM3D/BM3D_TIP_2007.pdf) in `DIP-Recon/data/`, which can be used to replicate the validation experiments presented in our paper.
+
+## Running
+All training scripts for replication the experiments shown in the paper can be found in `DIP-Recon/scripts/`.
+
+For Figure 3 (a) (the importance of upsampling), run the following respectively:
+```shell script
+./scripts/denoising_dd_noise.sh
+./scripts/denoising_dd_BilinearUp.sh
+./scripts/denoising_dd_TransUp.sh
+```
+and similarly for Figure 3 (b), just change the `--model_type` from `DD` to `ConvDecoder`.
+
+
+
+## Extension to Transformers
+For detailed instructions please see `transformer-DIP`.
+
+
