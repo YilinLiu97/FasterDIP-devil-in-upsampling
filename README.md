@@ -38,4 +38,14 @@ For detailed instructions please see `DIP-Recon/transformer-DIP`.
 
 *More to come*.
 
+## Citation
+```shell script
+@article{liu2023devil,
+  title={The Devil is in the Upsampling: Architectural Decisions Made Simpler for Denoising with Deep Image Prior},
+  author={Liu, Yilin and Li, Jiang and Pang, Yunkui and Nie, Dong and Yap, Pew-thian},
+  journal={arXiv preprint arXiv:2304.11409},
+  year={2023}
+}
+```
+
 
