@@ -1,6 +1,6 @@
 # Faster-DIP-Devil-in-Upsampling
 
-Codebase for our paper "*The Devil is in the Upsampling: Architectural Decisions Made Simpler for Denoising with Deep Image Prior*". [Arxiv](https://arxiv.org/pdf/2304.11409.pdf)
+Codebase for our paper "*The Devil is in the Upsampling: Architectural Decisions Made Simpler for Denoising with Deep Image Prior*". ICCV 2023, [preprint](https://arxiv.org/pdf/2304.11409.pdf)
 
 We discover that the *unlearnt* upsampling is the main driving force behind the denoising phenomenon (and probably other image restoration tasks as well, e.g., super resolution) when the Deep Image Prior[(DIP)](https://arxiv.org/pdf/1711.10925.pdf) paradigm is used, and translate this finding into practical DIP architectural design for every image without the laborious search
 
