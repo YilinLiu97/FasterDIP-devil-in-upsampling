@@ -21,7 +21,7 @@ For Figure 4 (testing of customized upsamplers), modify and run:
 ./scripts/cd_lpf.sh
 ```
 
-## Extension to Transformers
+## Extend to Transformers
 For detailed instructions please see `DIP-Recon/transformer-DIP`.
 
 *More to come*.
